@@ -1,3 +1,22 @@
+# Import Elveflow library
+import sys
+import os
+from email.header import UTF8
+# SDK_HOME = 'C:/Users/Admin/ELVEFLOW/SDK_V3_04_04'
+SDK_HOME = 'C:/Users/Admin/ELVEFLOW/ESI_V3_04_01/SDK V3_04_01'
+sys.path.append(SDK_HOME+'/DLL64/DLL64')#add the path of the library here
+sys.path.append(SDK_HOME+'/Python_64')#add the path of the LoadElveflow.py
+
+from ctypes import *
+
+from array import array
+
+from Elveflow64 import *
+import serial
+
+from time import sleep, time
+import numpy as np
+
 Z_regulator_type = {
     'none': 0,
     '0_200_mbar': 1,
@@ -297,7 +316,7 @@ class msr():
         error=M_S_R_D_Destructor(self.Instr_ID.value)
         
 class acton_trigger():
-    def __init__(self, address='COM3', timeout=20.0):
+    def __init__(self, address='COM3', timeout=30.0):
         self.uno = serial.Serial()
         self.uno.port = address
 #         self.uno.timeout = 20
@@ -467,7 +486,7 @@ class sampler():
                         print('Pressure under range {}'.format(x))
                     x = press_range[0]
                         
-                poe.ob1.set_pressure(x)
+                self.ob1.set_pressure(x)
 
                 x_arr.append(x)
                 y_arr.append(y)
@@ -591,40 +610,60 @@ class sampler():
         return: 
         """
         max_press = 60.0
+        max_press_clean=100.0
+        max_pull = 70.0
+        
         print('Sending sample from {} to flowcell'.format(source))
         if source=='water':
             # push cleaning buffer (ethanol)
             self.set_valves('water', 'flow-cell')
-            poe.sample(sensor=("msr", 1), setpoint=500, press_range=(0,max_press), trigger=0.0, overtime=15.0, timeout=30)
+            self.sample(sensor=("msr", 1), setpoint=500, press_range=(0,max_press), trigger=0.0, overtime=15.0, timeout=30)
 
             # send plug to flow-cell
-            poe.set_valves('air', 'flow-cell')
-            poe.sample(sensor=("msr", 2), setpoint=400, press_range=(-max_press,max_press), trigger=0.0, overtime=16.0, timeout=40)
-
-        elif source in ['tflask1', 'tflask2', 'tflask3', 'tflask4']:
+            self.set_valves('air', 'flow-cell')
+            self.sample(sensor=("msr", 2), setpoint=400, press_range=(-max_press,max_press), trigger=0.0, overtime=16.0, timeout=40)
+        elif source=='tflask4': # Wash buffer
             # pull back on water line
-            poe.clear(target='flow-cell', timeout=10, pressure=max_press)            
+            self.clear(target='flow-cell', timeout=5, pressure=max_press_clean)            
             self.set_valves('water', 'flow-cell')
-            poe.pushpull(pressure=-max_press, timeout=3)
+            self.pushpull(pressure=-max_press, timeout=3)
+            
+            # pull water plug
+            self.set_valves('water', source)
+            self.sample(sensor=("msr", 1), setpoint=-1000, press_range=(-max_pull,max_pull/2.0), trigger=0.1, overtime=5.0, timeout=20)
+            
+            # push full plug to flow-cell
+            self.set_valves('water', 'flow-cell')
+            self.sample(sensor=("msr", 2), setpoint=1000, press_range=(-max_press_clean/2.0,max_press_clean), trigger=0.0, overtime=10.0, timeout=30)
+            
+            # push back fluid into reservoirs
+            self.set_valves('air', source)
+            self.pushpull(pressure=150, timeout=10)
+            
+        elif source in ['tflask1', 'tflask2', 'tflask3']:
+            # pull back on water line
+            self.clear(target='flow-cell', timeout=5, pressure=max_press_clean)            
+            self.set_valves('water', 'flow-cell')
+            self.pushpull(pressure=-max_press, timeout=3)
             
             # pull sample
             self.set_valves('water', source)
-            self.sample(sensor=("msr", 1), setpoint=-500, trigger=0.1, overtime=1.0, timeout=30)
-
+            self.sample(sensor=("msr", 1), setpoint=-100, press_range=(-max_pull,max_pull/2.0), trigger=0.0, overtime=0.5, timeout=20)
+            
             # send plug to flow-cell
-            poe.set_valves('air', 'flow-cell')
-            poe.sample(sensor=("msr", 2), setpoint=500, press_range=(-max_press/2.0,max_press), trigger=0.0, overtime=17.0, timeout=40)
+            self.set_valves('air', 'flow-cell')
+            self.sample(sensor=("msr", 2), setpoint=900, press_range=(-max_press/2.0,max_press), trigger=0.0, overtime=6.0, timeout=30)
 
             # push back fluid into reservoirs
-            poe.set_valves('air', source)
-            poe.pushpull(pressure=250, timeout=10)
+            self.set_valves('air', source)
+            self.pushpull(pressure=150, timeout=10)
         else:
             print('{} source is not supported'.format(source))
             
-        poe.set_valves('air', 'tflask4')
+        self.set_valves('air', 'tflask4')
         print('Sending Sample from {} at flowcell done\n'.format(source))
             
-    def clear(self, target, timeout=20, pressure=100):
+    def clear(self, target, timeout=10, pressure=100):
         """
         Sends air through lines to target to remove any liquids       
         Parameters:            
@@ -646,7 +685,7 @@ class sampler():
             if reservoir == 'flow-cell':
                 self.pushpull(pressure=pressure, timeout=timeout, sensor=('msr', 2))
             else:
-                self.pushpull(pressure=250, timeout=timeout, sensor=('msr', 1))
+                self.pushpull(pressure=pressure, timeout=timeout, sensor=('msr', 1))
                 
     def clean(self, target):
         """
@@ -689,7 +728,7 @@ class sampler():
         print('Cleaning flow cell')
         for i in range(cycles):
             # get water plug
-            self.to_flowcell(source='tflask3')
+            self.to_flowcell(source='tflask4')
 #             sleep(20)
             # send water plug out 
 #             self.clear(target='flow-cell', timeout=15, pressure=70)
@@ -697,8 +736,8 @@ class sampler():
             self.clear(target='flow-cell', timeout=10, pressure=70)
         
 #         # Pull water line
-#         poe.set_valves('water', 'flow-cell')
-#         poe.pushpull(pressure=-40, timeout=5)
+#         self.set_valves('water', 'flow-cell')
+#         self.pushpull(pressure=-40, timeout=5)
         
         print('Cleaning done\n')
             
@@ -711,6 +750,7 @@ class sampler():
             Nclean: integer (number of cleaning cycles between sample)
         return: 
         """
+        t_start = time()
 #         print('\nclean cell')
 #         self.clean_cell(cycles=Nclean)
         for sample in samples:
@@ -725,8 +765,11 @@ class sampler():
             
             print('\nclean cell')
             self.clean_cell(cycles=Nclean)
-            
-        print('Measurement Done')
+        
+        self.clear('allflasks', timeout=10, pressure=150)
+        
+        t_end = time()
+        print('Measurement Done in {} secs'.format(t_end-t_start))
         
     def __del__(self):
         
