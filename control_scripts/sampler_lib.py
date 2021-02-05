@@ -15,6 +15,7 @@ from Elveflow64 import *
 import serial
 
 from time import sleep, time
+import datetime
 import numpy as np
 
 Z_regulator_type = {
@@ -751,6 +752,7 @@ class sampler():
         return: 
         """
         t_start = time()
+        t_acquire = 0.0
 #         print('\nclean cell')
 #         self.clean_cell(cycles=Nclean)
         for sample in samples:
@@ -758,7 +760,9 @@ class sampler():
             self.to_flowcell(source=sample)
             
             print('\nacquire spectra')
+            t_acquire_start = time()
             self.acton.send_trigger(N=N)
+            t_acquire = t_acquire+time()-t_acquire_start
             
             print('\nclear cell')
             self.clear(target='flow-cell', timeout=5, pressure=70)
@@ -769,7 +773,7 @@ class sampler():
         self.clear('allflasks', timeout=10, pressure=150)
         
         t_end = time()
-        print('Measurement Done in {} secs'.format(t_end-t_start))
+        print('Measurement Done in total: {}, acquiring: {}'.format(datetime.timedelta(seconds=t_end-t_start), datetime.timedelta(seconds=t_acquire)))
         
     def __del__(self):
         
