@@ -361,15 +361,16 @@ class acton_trigger():
             - pm: Thorlabs powermeter object passed by reference
                   if given will measure power during duration of acquisition and return an array of measurements
         Returns if pm is given:
-            - power_measurements: float (average power measurements)
+            - power_measurements: (N,) float list (average power measurements for each spectra)
         """
         power=c_double()
-        power_measurements = []
+        power_meas_array = []
 
         t=0
         t_start=time()
 
         for i in range(0, N):
+            power_measurements = []
             state = self.get_state()
 
             if state == b'1':
@@ -386,6 +387,7 @@ class acton_trigger():
 
                     if state == b'1' or state == b'0' :
                         print('{:.4g} Trigger acquired'.format(i+1))
+                        power_meas_array.append(np.mean(power_measurements))
                         break
                     sleep(self.dt)
 
@@ -407,7 +409,9 @@ class acton_trigger():
             print('Experiment took {:.4g} secs'.format(t_end-t_start))
 
         if pm is not None:
-            return np.mean(power_measurements)
+            return power_meas_array
+        else:
+            return None
 
 class sampler():
     def __init__(self, verbose=False):
@@ -842,6 +846,7 @@ class sampler():
             N: integer (number of spectra per sample)
             Nclean: integer (number of cleaning cycles between sample)
         return:
+            power_meas_array: (number of samples, N) array (average laser power per spectra)
         """
         t_start = time()
         t_acquire = 0.0
@@ -853,7 +858,7 @@ class sampler():
 
             print('\nacquire spectra')
             t_acquire_start = time()
-            self.acton.send_trigger(N=N, pm=byref(self.pm))
+            power_meas_array = self.acton.send_trigger(N=N, pm=byref(self.pm))
             t_acquire = t_acquire+time()-t_acquire_start
 
             print('\nclear cell')
@@ -867,6 +872,8 @@ class sampler():
         t_end = time()
         print('Measurement Done in total: {}, acquiring: {}'.format(datetime.timedelta(seconds=t_end-t_start), datetime.timedelta(seconds=t_acquire)))
 
+        return np.reshape(power_meas_array, (len(samples), N))
+
     def __del__(self):
         self.set_valves('air', 'flow-cell')
         self.ob1.set_pressure(0)
@@ -878,7 +885,7 @@ class sampler():
             print('Could not close serial port to acton-trigger board : {}'.format(sys.exc_info()))
         else:
             print('serial port to acton-trigger board closed')
-        
+
         # Thorlabs Powermeter
         try:
             self.pm.close()
