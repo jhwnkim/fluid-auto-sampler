@@ -6,4 +6,6 @@ Repository for design and software control of fluid auto-sampler, for sampling f
 ```
 conda install -c conda-forge pint
 conda install -c conda-forge uncertainties
+conda install pandas
+conda install cvxopt
 ```
