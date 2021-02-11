@@ -8,11 +8,15 @@ sys.path.append(SDK_HOME+'/DLL64/DLL64')#add the path of the library here
 sys.path.append(SDK_HOME+'/Python_64')#add the path of the LoadElveflow.py
 
 from ctypes import *
-
 from array import array
 
 from Elveflow64 import *
+
+# Serial import to talk with Arduino for spectrometer trigger
 import serial
+
+# Thorlabs Power meter
+from TLPM import TLPM
 
 from time import sleep, time
 import datetime
@@ -333,6 +337,19 @@ class acton_trigger():
     def __del__(self):
         self.uno.close()
     
+    def get_state(self):
+        self.uno.write(b'S')
+        state = self.uno.read()
+        print('Acton state at {}'.format(state))
+        
+        return state
+    
+    def send_single(self):
+        self.uno.write(b'T')
+        state = self.uno.read()
+        
+        return state
+    
     def send_trigger(self, N=10):
         t=0
         t_start=time()
@@ -389,6 +406,31 @@ class sampler():
             self.acton = acton_trigger(address='COM3', timeout=20.0)
         except:
             print('Error opening connection to Acton trigger board')
+        
+        
+        try: 
+            self.pm = TLPM()
+            deviceCount = c_uint32()
+            self.pm.findRsrc(byref(deviceCount))
+
+            print("devices found: " + str(deviceCount.value))
+
+            resourceName = create_string_buffer(1024)
+
+            for i in range(0, deviceCount.value):
+                tlPM.getRsrcName(c_int(i), resourceName)
+                print(c_char_p(resourceName.raw).value)
+                break
+
+            self.pm.open(resourceName, c_bool(True), c_bool(True))
+
+            message = create_string_buffer(1024)
+            self.pm.getCalibrationMsg(message)
+            print(c_char_p(message.raw).value)
+        except:
+            print('Could not open Thorlabs Power meter : {}'.format(sys.exc_info()))
+        else:
+            print('Thorlabs Powermeter connected')    
         
         self.verbose = verbose
         
@@ -775,10 +817,11 @@ class sampler():
         t_end = time()
         print('Measurement Done in total: {}, acquiring: {}'.format(datetime.timedelta(seconds=t_end-t_start), datetime.timedelta(seconds=t_acquire)))
         
-    def __del__(self):
-        
+    def __del__(self):        
         self.set_valves('air', 'flow-cell')
         self.ob1.set_pressure(0)
         
         self.acton.uno.close()
+        
+        self.pm.close()
         
